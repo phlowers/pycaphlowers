@@ -8,3 +8,7 @@ def example_function(x: int) -> int:
         int: The square of the input integer.
     """
     return x
+
+
+def example_function_2(y: float) -> float:
+    return y * y
