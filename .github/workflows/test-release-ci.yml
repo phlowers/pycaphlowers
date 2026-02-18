@@ -1,0 +1,146 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: 🚀 Build upload on test-pypi
+
+on:
+  release:
+    types: [created, prereleased]
+  workflow_dispatch:
+    inputs:
+      devVersion:
+        description: 'Development version'     
+        required: true
+        type: integer
+        default: '0'
+      logLevel:
+        description: 'Log level'     
+        required: true
+        default: 'warning'
+
+env:
+  PACKAGE_BUILD_TEST: ${{ github.event.inputs.devVersion }}
+
+
+jobs:
+  release-ci:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest]
+        python:
+          - {
+            name: cp311,
+            abi: cp311,
+            version: '3.11'
+          }
+          - {
+            name: cp312,
+            abi: cp312,
+            version: '3.12'
+          }
+          - {
+            name: cp313,
+            abi: cp313,
+            version: '3.13'
+          }
+
+    steps:
+      - name: 📃 Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Disable shallow clones to improve sonarcloud analysis
+
+      - name: ⚙️ Install uv and Set up Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Install a specific version of uv.
+          version: "0.5.24"
+          python-version: ${{ matrix.python-version }}
+
+      - name: ⚙️ Check uv version
+        run: |
+          uv --version
+
+      - name: ⚙️ Install dependencies
+        run: |
+          uv sync --frozen --group all
+
+      - name: ✔️ Check code style
+        run: |
+          uv run ruff format --check
+
+      - name: ✔️ Lint code
+        run: |
+          uv run ruff check
+
+      - name: ✔️ Check typing
+        run: |
+          uv run mypy .
+
+      - name: ✔️ Run tests and generate coverage report
+        run: |
+          uv run pytest --cov-report xml --cov=mechaphlowers test/ -m "not benchmark"
+
+      - name: ✔️ Run Sonar analysis
+        uses: SonarSource/sonarqube-scan-action@v5.3.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_MPH }}
+        with:
+          args: |
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+
+      - name: 🛠️ Build wheel
+        run: |
+          uv build
+
+
+
+  publish-to-testpypi:
+    name: Publish Python 🐍 distribution 📦 to TestPyPI
+    runs-on: ubuntu-latest
+    needs:
+      - release-ci
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+
+    # Dedicated environments with protections for publishing are strongly recommended.
+    # For more information, see: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pycaphlowers
+      # OPTIONAL: uncomment and update to include your PyPI project URL in the deployment status:
+      # url: https://pypi.org/p/YOURPROJECT
+      #
+      # ALTERNATIVE: if your GitHub Release name is the PyPI project version string
+      # ALTERNATIVE: exactly, uncomment the following line instead:
+      # url: https://pypi.org/project/YOURPROJECT/${{ github.event.release.name }}
+
+    steps:
+      - name: 📃 Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Disable shallow clones to improve sonarcloud analysis
+      - name: ⚙️ Install uv and Set up Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Install a specific version of uv.
+          version: "0.5.24"
+          python-version: "3.11"
+      - name: ⚙️ Check uv version and parameters
+        run: |
+          uv --version
+          echo "PACKAGE_BUILD_TEST: $PACKAGE_BUILD_TEST"
+      - name: 🛠️ Build wheel
+        run: |
+          uv build
+      - name: 🚀 Publish release distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
